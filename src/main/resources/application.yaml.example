@@ -1,0 +1,44 @@
+server.port: 8080
+
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/defcode
+    driver-class-name: org.postgresql.Driver
+    username: your_username
+    password: your_password
+  mail:
+    host: smtp.domen.com
+    port: 587
+    username: your_email@domen.ru
+    password: your_password
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+jwt:
+  secret:
+    access: vt3fI5kwBmGvDQPcUrNVkO+Iw/XC75OtH7JlcHlsIcQ=
+    refresh: 57gzLd0XY1SJl/g29vSC8jT/UmHoLMC+18bwp+LiG0Q=
+  expiration-time:
+    access: 10
+    refresh: 30
+logging:
+  level:
+    org:
+      springframework:
+        jdbc:
+          core=DEBUG:
+smpp:
+  host: localhost
+  port: 2775
+  system_id: smppclient1
+  password: password
+  system_type: OTP
+  source_addr: OTPService
+telegram:
+  bot:
+    token: bot_token
+  api:
+    url: https://api.telegram.org/bot%s/sendMessage
