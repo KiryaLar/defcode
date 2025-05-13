@@ -1,202 +1,317 @@
-# Defcode - OTP Code Management System
-## Описание проекта
-**Defcode** - это система управления одноразовыми паролями (OTP), разработанная на Spring Boot. Проект предоставляет REST API для регистрации пользователей, аутентификации, генерации и валидации OTP-кодов через различные каналы (например, SMS, Email, Telegram), а также административные функции для управления пользователями и настройками OTP.
+# Defcode - сервис одноразовых временных кодов (OTP)
 
-Установка и запуск
+## Содержание
+- [Описание](#описание)
+- [Технологии](#технологии)
+- [Структура проекта](#структура-проекта)
+- [Сборка и запуск](#сборка-и-запуск)
+- [Использование API](#использование-api)
+  - [Аутентификация](#аутентификация)
+  - [Пользовательские OTP-операции](#пользовательские-otp-операции)
+  - [Администрирование](#администрирование)
 
-Склонируйте репозиторий:
-git clone https://github.com/yourusername/defcode.git
+## Описание
+
+**Defcode** - это система управления одноразовыми паролями (OTP), разработанная на Spring Boot. Проект предоставляет REST API для регистрации пользователей, аутентификации, генерации и валидации OTP-кодов через различные каналы (SMS, Email, Telegram), а также административные функции для управления пользователями и настройками OTP.
+
+Приложение позволяет
+✔️ Создавать «операции под защитой» 🔐
+✔️ Генерировать и хранить OTP‑коды ⏱️
+✔️ Доставлять коды по SMS, E‑mail и Telegram ✉️🤖
+✔️ Проверять введённый пользователем код ✅
+✔️ Администрировать длину и время жизни кода ⚙️
+
+- Клиент инициирует операцию (например, «сброс пароля») и указывает способ доставки кода (SMS, EMAIL, TELEGRAM) и контакт.
+   
+- Сервис генерирует числовой код (по умолчанию — 4 цифры, TTL — 60 сек).
+- Код сохраняется в базе со статусом ACTIVE и отправляется выбранным каналом.
+- Пользователь вводит код — DefCode проверяет его статус, срок жизни и соответствие операции.
+- Под капотом используется собственная реализация TOTP: код зависит от операции, контакта и текущего времени, что исключает повторное использование и повышает стойкость.
+
+## Технологии
+| Стек                    | Версия / Назначение                           |
+|-------------------------|-----------------------------------------------|
+| Java                   | 17 LTS                                        |
+| Spring Boot            | 3.2.x                                         |
+| Spring Security + JWT  | Авторизация / распределение ролей             |
+| Spring Data JPA, JDBC | Работа с PostgreSQL                        |
+| MapStruct              | Маппинг DTO ↔ Entity                         |
+| Lombok                 | Уменьшение шаблонного кода (boilerplate)      |
+| Maven                  | Сборка проекта                                |
+| PostgreSQL             | Хранение пользователей и OTP-кодов            |
+| SLF4J + Logback        | Логирование                                   |
+
+## Структура проекта
+```bash
+src
+├───main
+│   ├───java
+│   │   └───com
+│   │       └───larkin
+│   │           └───defcode
+│   │               ├───config
+│   │               ├───controller
+│   │               ├───dao
+│   │               ├───dto
+│   │               │   ├───request
+│   │               │   └───response
+│   │               ├───entity
+│   │               ├───exception
+│   │               ├───mapper
+│   │               ├───security
+│   │               │   ├───config
+│   │               │   ├───filter
+│   │               │   └───service
+│   │               ├───service
+│   │               └───util
+│   └───resources
+└───test
+
+```
+Схема БД и скрипты находятся в /src/main/resources/db.
+
+## Сборка и запуск
+
+### 1️⃣ Клонировать репозиторий
+
+```bash
+git clone https://github.com/username/defcode.git
 cd defcode
+```
 
+### 2️⃣ Настроить окружение
 
-Настройте базу данных PostgreSQL:
+- Установите PostgreSQL 15+ и создайте базу defcode_db.
 
-Создайте базу данных defcode.
-Выполните SQL-скрипты для создания таблиц и начальных данных:create type role as enum ('ADMIN', 'USER');
-create type otp_status as enum ('ACTIVE', 'EXPIRED', 'USED');
+- Создайти application.yaml на основе application.yaml.origin из проекта
+### 3️⃣ Собрать и запустить
+```bash
+mvn clean install      # сборка и юнит‑тесты
+mvn spring-boot:run    # запуск
+```
+После старта API доступно по адресу http://localhost:8080.
 
-create table users (
-    id serial primary key,
-    username varchar(64) unique not null,
-    password varchar(32) not null,
-    role role not null
-);
+## Использование API
 
-create table token (
-    id serial primary key,
-    user_id int references users (id) not null,
-    token varchar(124) unique not null,
-    expiration_date timestamp not null,
-    revoked bool default false
-);
+    Во всех примерах HOST = http://localhost:8080.
+    Формат даты времени — ISO 8601.
 
-create table otp_config (
-    id serial primary key,
-    code_length int not null default 6,
-    lifetime interval not null default '1 minutes'
-);
-insert into otp_config values (1, 4);
+## Аутентификация
+| Метод | URL                  | Тело запроса                  | Описание                                |
+|-------|-----------------------|-------------------------------|-----------------------------------------|
+| POST  | `/auth/register`      | `{username, password, role}`  | Регистрация (роль: `ADMIN` или `USER`)  |
+| POST  | `/auth/login`         | `{username, password}`        | Получить `accessToken` и `refreshToken` |
+| POST  | `/auth/refresh-token` | `{refreshToken}`              | Обновить JWT‑пару                        |
+| POST  | `/auth/logout`        | `{refreshToken}`              | Отозвать refresh‑токен                  |
 
-create table otp_codes (
-    id bigserial primary key,
-    code int not null,
-    user_id int references users (id) on delete cascade not null,
-    status otp_status default 'ACTIVE',
-    expiration_time timestamp not null,
-    operation_type int references operation (operation_type) on delete set NULL not null
-);
+### Пример запроса POST `/auth/register`
+```http
+POST /auth/register
+Content-Type: application/json
 
-create table operation (
-    operation_type int primary key,
-    description varchar(128) not null
-);
+{
+  "username": "user",
+  "password": "Secret123",
+  "role": "user",
+}
+```
+**Ответ 201 Created**
+```json
+{
+  "message": "User alice has successfully registered as an USER",
+  "timestamp": "Tue May 01 12:45:01 GMT+03:00 2025"
+}
+```
 
-insert into operation values (1, 'Login Verification');
-insert into operation values (2, 'Account Registration');
-insert into operation values (3, 'Password Reset');
-insert into operation values (4, 'Transaction Confirmation');
-insert into operation values (5, 'Update Contact Information');
-insert into operation values (6, 'Account Deletion');
+### Пример запроса POST `/auth/login`
+```http
+POST /auth/login
+Content-Type: application/json
 
+{
+  "username": "user",
+  "password": "Secret123"
+}
+```
+**Ответ 200 OK**
+```json
+{
+  "role": "USER",
+  "accessToken": "<JWT>",
+  "refreshToken": "<JWT>"
+}
+```
+### Пример запроса POST `/auth/logout`
+```http
+POST /auth/logout
+Content-Type: application/json
 
+{
+  "refreshToken": "<ваш_refresh_token>"
+}
+```
+**Ответ 200 OK**
+```json
+{
+  "message": "Success logged out",
+  "timestamp": "Tue May 01 12:45:01 GMT+03:00 2025"
+}
+```
+### Пример запроса POST `/auth/refresh-token`
+```http
+POST /auth/refresh-token
+Content-Type: application/json
 
+{
+  "refreshToken": "<ваш_refresh_token>"
+}
+```
+**Ответ 200 OK**
+```json
+{
+  "role": "USER",
+  "accessToken": "<новый_access_token>",
+  "refreshToken": "<новый_refresh_token>"
+}
+```
 
-Настройте конфигурацию:
+Добавляйте заголовок Authorization: Bearer <accessToken> ко всем защищённым эндпоинтам.
 
-Отредактируйте файл src/main/resources/application.properties:spring.datasource.url=jdbc:postgresql://localhost:5432/defcode
-spring.datasource.username=your_username
-spring.datasource.password=your_password
-spring.jpa.hibernate.ddl-auto=update
+## Пользовательские OTP-операции
 
+| Метод | URL                   | Тело запроса                         | Назначение                     |
+|-------|------------------------|--------------------------------------|--------------------------------|
+| POST  | `/user/otp/generate`   | `{method, contact, operationType}`   | Сгенерировать и отправить код |
+| POST  | `/user/otp/validate`   | `{code}`                             | Проверить введённый код       |
 
+### Значения `operationType`:
+1. Login Verification
+2. Account Registration
+3. Password Reset
+4. Transaction Confirmation
+5. Update Contact Information
+6. Account Deletion
 
+### Пример генерации кода по SMS
+```http
+POST /user/otp/generate
+Authorization: Bearer <accessToken>
+Content-Type: application/json
 
-Запустите приложение:
-mvn clean install
-mvn spring-boot:run
+{
+  "method": "sms",
+  "contact": "+79179997799",
+  "operationType": "4"
+}
+```
+### Пример генерации кода по email
+```http
+POST /user/otp/generate
+Authorization: Bearer <accessToken>
+Content-Type: application/json
 
+{
+  "method": "email",
+  "contact": "user@yande.ru",
+  "operationType": "2"
+}
+```
+### Пример генерации кода по telegram
+```http
+POST /user/otp/generate
+Authorization: Bearer <accessToken>
+Content-Type: application/json
 
-Приложение будет доступно по адресу http://localhost:8080.
+{
+  "method": "telegram",
+  "contact": "<telegram bot chat id>",
+  "operationType": "4"
+}
+```
+**Ответ 200 OK**
+```json
+{
+  "message": "Code was successfully sent",
+  "timestamp": "Tue May 01 12:45:01 GMT+03:00 2025"
+}
+```
 
+### Пример валидации кода
+```http
+POST /user/otp/validate
+Content-Type: application/json
 
-Использование
-Сервис предоставляет REST API для управления пользователями, аутентификации и OTP-кодами. Все запросы, кроме /auth/register и /auth/login, требуют JWT-токен в заголовке Authorization: Bearer <access_token>.
-Поддерживаемые команды (эндпоинты)
-Аутентификация
+{
+  "code": "123456"
+}
+```
+**Ответ 200 OK**
+```json
+{
+  "message": "Code is correct",
+  "timestamp": "Tue May 01 12:45:01 GMT+03:00 2025"
+}
+```
 
-POST /auth/register - Регистрация нового пользователя.
-POST /auth/login - Вход и получение JWT-токенов.
-POST /auth/logout - Выход (отзыв refresh-токена).
-POST /auth/refresh-token - Обновление access-токена.
+## Администрирование
+| Метод | URL                  | Тело запроса               | Функция                             |
+|-------|-----------------------|----------------------------|-------------------------------------|
+| PUT   | `/admin/otp-config`   | `{length, lifetime}`       | Изменить длину и TTL кода           |
+| GET   | `/admin/users`        | –                          | Получить список пользователей (USER)|
+| DELETE| `/admin/users/{id}`   | –                          | Удалить пользователя                |
+### Значения `lifetime` в виде число + один символ из (smhd):
+1. 30s
+2. 2m
+3. 3h
+4. 1d
 
-Управление OTP
+### Пример изменения конфигурации
+```http
+PUT /admin/otp-config
+Authorization: Bearer <accessToken>
+Content-Type: application/json
 
-POST /user/otp/generate - Генерация и отправка OTP-кода.
-POST /user/otp/validate - Валидация OTP-кода.
+{
+  "length": 8,
+  "lifetime": "2m"   // 2 минуты 
+}
+```
+**Ответ 200 OK**
+```json
+{
+  "message": "OTP config was successfully changed: New duration: 2m New code length: 8",
+  "timestamp": "Tue May 01 12:45:01 GMT+03:00 2025"
+}
+```
 
-Административные функции
+### Пример получения списка пользователей
+```http
+GET /admin/users
+Authorization: Bearer <access_token>
+```
+**Ответ 200 OK**
+```json
+[
+  {
+    "id": 1,
+    "username": "user1"
+  },
+  {
+    "id": 2,
+    "username": "user2"
+  }
+]
+```
 
-PUT /admin/otp-config - Изменение конфигурации OTP.
-GET /admin/users - Получение списка пользователей (только не-админов).
-DELETE /admin/users/{id} - Удаление пользователя по ID.
-
-Примеры запросов
-Регистрация пользователя
-curl -X POST http://localhost:8080/auth/register \
--H "Content-Type: application/json" \
--d '{
-    "username": "admin",
-    "password": "Password1",
-    "role": "admin"
-}'
-
-Вход
-curl -X POST http://localhost:8080/auth/login \
--H "Content-Type: application/json" \
--d '{
-    "username": "admin",
-    "password": "Password1"
-}'
-
-Генерация OTP-кода
-curl -X POST http://localhost:8080/user/otp/generate \
--H "Content-Type: application/json" \
--H "Authorization: Bearer <access_token>" \
--d '{
-    "method": "email",
-    "contact": "user@example.com",
-    "operationType": "1"
-}'
-
-Валидация OTP-кода
-curl -X POST http://localhost:8080/user/otp/validate \
--H "Content-Type: application/json" \
--H "Authorization: Bearer <access_token>" \
--d '{
-    "code": "1234"
-}'
-
-Изменение конфигурации OTP (админ)
-curl -X PUT http://localhost:8080/admin/otp-config \
--H "Content-Type: application/json" \
--H "Authorization: Bearer <access_token>" \
--d '{
-    "length": 6,
-    "lifetime": "2 minutes"
-}'
-
-Тестирование
-Для тестирования используйте Postman или curl:
-
-Зарегистрируйте пользователя через /auth/register.
-Выполните вход через /auth/login и сохраните полученные accessToken и refreshToken.
-Используйте accessToken для вызова защищенных эндпоинтов (например, генерация и валидация OTP).
-Проверьте административные функции с учетной записью роли ADMIN.
-
-Юнит-тесты находятся в src/test/java и могут быть запущены командой:
-mvn test
-
-Структура проекта
-
-src/main/java/com/larkin/defcode:
-
-config - Конфигурационные классы (Spring, безопасность).
-controller - REST-контроллеры (AuthController, UserController, AdminController).
-dao - Интерфейсы для работы с базой данных.
-dto - Объекты передачи данных:
-request - Входные DTO (например, RegisterUserRequest, GenerateOtpRequestDto).
-response - Выходные DTO (например, AuthenticationResponse, SuccessResponse).
-
-
-entity - Сущности базы данных (например, User, OtpCode).
-exception - Кастомные исключения.
-mapper - Преобразование между сущностями и DTO.
-security - Настройки безопасности (JWT, фильтры).
-service - Бизнес-логика (например, UserService, OtpCodeService).
-util - Утилитные классы.
-
-
-src/main/resources:
-
-application.properties - Конфигурация приложения.
-
-
-logs - Директория для логов.
-
-
-Инструкции по установке внешних библиотек
-
-Проект использует стандартные зависимости Spring Boot, указанные в pom.xml.
-Для эмуляции SMS (если используется SMPP):
-Скачайте и запустите SMPPsim.
-Настройте подключение в application.properties.
-
-
-Для Telegram Bot:
-Создайте бота через BotFather и получите токен.
-Добавьте токен в application.properties.
-
-
-
-Лицензия
-Проект распространяется под лицензией MIT.
+### Пример удаления пользователя
+```http
+GET /admin/users/{id}
+Authorization: Bearer <access_token>
+```
+**Ответ 200 OK**
+```json
+{
+  "message": "User with id 1 deleted",
+  "timestamp": "Tue May 01 12:55:01 GMT+03:00 2025"
+}
+```
